@@ -1,0 +1,9 @@
+services:
+  ai_alloc:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ai_alloc:latest
+    container_name: ai_alloc_app
+    ports:
+      - "8000:8000"
