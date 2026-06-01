@@ -1,5 +1,10 @@
+import os
 from pathlib import Path
 from typing import List
+from dotenv import load_dotenv
+
+# Load env variables at the very beginning of configuration initialization
+load_dotenv(Path(__file__).resolve().parent.parent.parent / ".env")
 
 class Settings:
     # Root directory of the project
@@ -52,5 +57,15 @@ class Settings:
         "Methodology_Used_Scrum",
         "Methodology_Used_Waterfall",
     ]
+
+    # LLM & Agent Configurations
+    LLM_PROVIDER: str = os.getenv("LLM_PROVIDER", "ollama")
+    LLM_MODEL: str = os.getenv("LLM_MODEL", "qwen2.5:7b")
+    LLM_TEMPERATURE: float = float(os.getenv("LLM_TEMPERATURE", "0.7"))
+    
+    # API Keys & Endpoints
+    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
+    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", os.getenv("GOOGLE_API_KEY", ""))
+    OLLAMA_BASE_URL: str = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 settings = Settings()

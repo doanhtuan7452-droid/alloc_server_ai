@@ -29,9 +29,8 @@ class EmployeeRecommendationService:
                 detail="Employee recommendation model is not loaded.",
             )
 
-    def predict(self, request: AllocationRequest) -> dict:
-        self.ensure_loaded()
-
+    def prepare_features(self, request: AllocationRequest) -> pd.DataFrame:
+        """Convert request into the scaled/processed dataframe containing all feature columns."""
         # Convert Pydantic request to dict and DataFrame
         input_dict = request.model_dump() if hasattr(request, "model_dump") else request.dict()
         df = pd.DataFrame([input_dict])
@@ -92,25 +91,53 @@ class EmployeeRecommendationService:
         ].mean(axis=1)
 
         # Filter columns to match feature columns list
+        return df
+
+    def predict_with_probabilities(self, request: AllocationRequest) -> dict:
+        """Runs inference and returns detailed predictions including raw class probabilities and confidence."""
+        self.ensure_loaded()
+        df = self.prepare_features(request)
         df_filtered = df[settings.ALLOCATION_FEATURE_COLUMNS]
 
         # Scaler transformation and prediction
         x_scaled = self.scaler.transform(df_filtered)
         x_scaled_df = pd.DataFrame(x_scaled, columns=settings.ALLOCATION_FEATURE_COLUMNS)
         predicted_class_idx = self.model.predict(x_scaled_df)[0]
-        predicted_status = self.label_encoder.inverse_transform(
-            [predicted_class_idx]
-        )[0]
+        predicted_status = self.label_encoder.inverse_transform([predicted_class_idx])[0]
+        
+        # Extract class probabilities (0.0 to 1.0 scale)
+        proba = self.model.predict_proba(x_scaled_df)[0]
+        model_classes = self.model.classes_
+        decoded_labels = self.label_encoder.inverse_transform(model_classes)
+        class_probabilities = {str(label): float(prob) for label, prob in zip(decoded_labels, proba)}
+        
+        # Calculate confidence score (0.0 to 100.0 scale) using text labels for absolute robustness
+        if predicted_status == "Optimal":
+            confidence_score = class_probabilities.get("Optimal", 0.0) * 100.0
+        else:
+            confidence_score = (
+                class_probabilities.get("Reassignment Required", 0.0)
+                + class_probabilities.get("Suboptimal", 0.0)
+            ) * 100.0
 
-        # Exact dictionary output shape
         return {
-            "is_success": True,
-            "prediction": predicted_status,
+            "prediction_label": predicted_status,
             "prediction_code": int(predicted_class_idx),
+            "class_probabilities": class_probabilities,
+            "confidence_score": confidence_score,
             "analyzed_metrics": {
                 "skill_gap": float(df["skill_gap"].iloc[0]),
                 "hours_per_day": float(df["hours_per_day"].iloc[0]),
             },
         }
 
+    def predict(self, request: AllocationRequest) -> dict:
+        self.ensure_loaded()
+        res = self.predict_with_probabilities(request)
+        return {
+            "is_success": True,
+            "prediction": res["prediction_label"],
+            "prediction_code": res["prediction_code"],
+            "analyzed_metrics": res["analyzed_metrics"],
+        }
 employee_service = EmployeeRecommendationService()

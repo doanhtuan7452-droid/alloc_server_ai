@@ -97,3 +97,4 @@ from app.main import app
 # 8. Re-export route functions
 from app.api.endpoints.allocation import suggest_allocation
 from app.api.endpoints.project_risk import predict_project_risk
+from app.api.endpoints.assessment import assess_personnel_allocation, assess_project_risk

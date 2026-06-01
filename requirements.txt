@@ -5,3 +5,8 @@ scikit-learn==1.8.0
 pandas==3.0.3
 joblib==1.5.3
 numpy==2.4.6
+langchain>=1.0.0
+langchain-openai>=1.0.0
+langchain-google-genai>=3.0.0
+langchain-ollama>=1.0.0
+python-dotenv>=1.0.1
