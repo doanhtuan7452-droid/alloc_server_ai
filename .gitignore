@@ -1,0 +1,42 @@
+# Byte-compiled / optimized files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.venv/
+
+# Distribution / packaging
+build/
+dist/
+*.egg-info/
+
+# IDE
+.vscode/
+.idea/
+
+# Jupyter Notebook
+.ipynb_checkpoints/
+
+# Unit test / coverage reports
+.coverage
+htmlcov/
+.pytest_cache/
+
+# Logs
+*.log
+
+# Environment variables
+.env
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Custom Application Files & Secrets
+generate_logical_data.py
+train_model_sugguest_employee.py
+hr_allocation_dataset.csv
