@@ -1,5 +1,6 @@
 from pydantic import BaseModel, Field
 from typing import List, Optional
+from app.schemas.mongo_chat import TokenUsage
 
 class ChatMessage(BaseModel):
     role: str = Field(..., description="Role of the message author: 'user' or 'assistant'")
@@ -23,3 +24,4 @@ class ChatRequest(BaseModel):
 class ChatResponse(BaseModel):
     response: str = Field(..., description="Phản hồi từ AI Agent")
     status: str = Field(default="success", description="Trạng thái phản hồi (success, error)")
+    usage: TokenUsage = Field(default_factory=TokenUsage, description="Báo cáo số token tiêu thụ")

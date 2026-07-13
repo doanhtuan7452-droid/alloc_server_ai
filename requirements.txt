@@ -10,3 +10,10 @@ langchain-openai>=1.0.0
 langchain-google-genai>=3.0.0
 langchain-ollama>=1.0.0
 python-dotenv>=1.0.1
+motor>=3.3.0
+tiktoken>=0.5.0
+markitdown
+langchain-text-splitters
+slowapi==0.1.9
+redis==5.0.1
+certifi>=2024.7.2

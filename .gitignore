@@ -40,3 +40,12 @@ Thumbs.db
 generate_logical_data.py
 train_model_sugguest_employee.py
 hr_allocation_dataset.csv
+
+test/
+
+# Docs file
+docs/
+
+docs_api_tool/
+
+docs_ml/

@@ -1,8 +1,11 @@
 from fastapi import HTTPException
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.schemas.assessment import ProjectRiskAssessmentRequest, ProjectRiskAssessmentResponse
+from app.schemas.mongo_chat import TokenUsage
 from app.services.project_risk import project_risk_service
 from app.services.llm_factory import LLMFactory
+from app.services.memory_service import count_tokens
+from app.core.config import settings
 
 class ProjectRiskAssessmentService:
     async def assess(self, request: ProjectRiskAssessmentRequest, bypass_llm: bool = False) -> ProjectRiskAssessmentResponse:
@@ -54,6 +57,7 @@ class ProjectRiskAssessmentService:
             business_status_text = "CHẤP THUẬN"
 
         # 4. LLM Explanation (or bypass)
+        token_usage = TokenUsage()
         if bypass_llm:
             llm_insight = ""
             explanation_source = "bypassed"
@@ -108,6 +112,29 @@ class ProjectRiskAssessmentService:
                 response = await llm.ainvoke(messages)
                 llm_insight = str(response.content)
                 explanation_source = "llm_explanation"
+                
+                # Count tokens
+                prompt_tokens = 0
+                completion_tokens = 0
+                if hasattr(response, "response_metadata") and response.response_metadata:
+                    meta = response.response_metadata
+                    usage = meta.get("token_usage") or meta.get("usage")
+                    if usage:
+                        prompt_tokens = usage.get("prompt_tokens") or usage.get("input_tokens") or 0
+                        completion_tokens = usage.get("completion_tokens") or usage.get("output_tokens") or 0
+
+                model_name = request.model or LLMFactory._default_models.get((request.provider or settings.LLM_PROVIDER).lower(), "gpt-4o-mini")
+                if not prompt_tokens:
+                    prompt_str = system_prompt + " " + user_prompt
+                    prompt_tokens = await count_tokens(prompt_str, llm=llm, model_name=model_name)
+                if not completion_tokens:
+                    completion_tokens = await count_tokens(llm_insight, llm=llm, model_name=model_name)
+
+                token_usage = TokenUsage(
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                    total_tokens=prompt_tokens + completion_tokens
+                )
             except Exception as exc:
                 print(f"[!] LLM execution failed, calling local template fallback: {exc}")
                 success_str = ", ".join(success_factors) if success_factors else "sử dụng phương pháp phù hợp"
@@ -145,7 +172,8 @@ class ProjectRiskAssessmentService:
             success_factors=success_factors,
             potential_challenges=potential_challenges,
             llm_insight=llm_insight,
-            explanation_source=explanation_source
+            explanation_source=explanation_source,
+            usage=token_usage
         )
 
 project_risk_assessment_service = ProjectRiskAssessmentService()

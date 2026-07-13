@@ -1,8 +1,11 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Request
 from app.schemas.chat import ChatRequest, ChatResponse
 from app.services.agent import agent_service
+from app.core.auth import get_api_key
+from app.core.rate_limit import limiter
+from app.services.tool_safety_guard import tool_safety_guard
 
-router = APIRouter(prefix="/chat", tags=["chat"])
+router = APIRouter(prefix="/chat", tags=["chat"], dependencies=[Depends(get_api_key)])
 
 @router.post(
     "/agent/query", 
@@ -22,21 +25,31 @@ router = APIRouter(prefix="/chat", tags=["chat"])
         "   - Địa chỉ kết nối mặc định: `http://localhost:11434` (tùy biến qua `OLLAMA_BASE_URL` trong `.env`)."
     )
 )
-async def query_agent(request: ChatRequest):
+@limiter.limit("15/minute")
+async def query_agent(request: Request, chat_req: ChatRequest):
+    # 0. Quét Prompt Injection trực tiếp trên câu hỏi của user
+    if tool_safety_guard.check_prompt_injection(chat_req.message):
+        raise HTTPException(
+            status_code=400,
+            detail="Yêu cầu bị từ chối do phát hiện dấu hiệu chỉ dẫn không an toàn (Prompt Injection)."
+        )
+
     try:
         # Convert Pydantic history objects to dictionaries
         history_dicts = [
             msg.model_dump() if hasattr(msg, "model_dump") else msg.dict()
-            for msg in request.history
+            for msg in chat_req.history
         ]
         
-        response_text = await agent_service.arun_agent(
-            message=request.message,
+        response_text, usage_data = await agent_service.arun_agent(
+            message=chat_req.message,
             history=history_dicts,
-            provider=request.provider,
-            model=request.model,
-            temperature=request.temperature
+            provider=chat_req.provider,
+            model=chat_req.model,
+            temperature=chat_req.temperature
         )
-        return ChatResponse(response=response_text, status="success")
+        return ChatResponse(response=response_text, status="success", usage=usage_data)
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise exc

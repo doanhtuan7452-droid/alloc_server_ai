@@ -1,37 +1,47 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends, Body, Request
+from typing import Union
 from app.schemas.assessment import (
     PersonnelAssessmentRequest,
+    BulkAssessmentRequest,
     AllocationAssessmentResponse,
+    BulkAllocationAssessmentResponse,
     ProjectRiskAssessmentRequest,
     ProjectRiskAssessmentResponse
 )
 from app.services.allocation_assessment import allocation_assessment_service
 from app.services.project_risk_assessment import project_risk_assessment_service
+from app.core.auth import get_api_key
+from app.core.rate_limit import limiter
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(get_api_key)])
 
 @router.post(
     "/allocation/assess",
-    response_model=AllocationAssessmentResponse,
+    response_model=Union[AllocationAssessmentResponse, BulkAllocationAssessmentResponse],
     summary="Đánh giá sự phù hợp và rủi ro của nhân sự được phân bổ"
 )
-async def assess_personnel_allocation(request: PersonnelAssessmentRequest):
+@limiter.limit("20/minute")
+async def assess_personnel_allocation(
+    request: Request,
+    payload: Union[PersonnelAssessmentRequest, BulkAssessmentRequest] = Body(...)
+):
     try:
-        return await allocation_assessment_service.assess(request)
-    except HTTPException:
-        raise
+        return await allocation_assessment_service.assess(payload)
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise exc
 
 @router.post(
     "/project-risk/assess",
     response_model=ProjectRiskAssessmentResponse,
     summary="Đánh giá mức độ rủi ro của dự án và giải thích"
 )
-async def assess_project_risk(request: ProjectRiskAssessmentRequest):
+@limiter.limit("20/minute")
+async def assess_project_risk(request: Request, payload: ProjectRiskAssessmentRequest):
     try:
-        return await project_risk_assessment_service.assess(request)
-    except HTTPException:
-        raise
+        return await project_risk_assessment_service.assess(payload)
+    except HTTPException as http_exc:
+        raise http_exc
     except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
+        raise exc

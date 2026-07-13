@@ -2,38 +2,54 @@ from langchain_core.tools import StructuredTool
 from app.schemas.allocation import AllocationRequest
 from app.schemas.project_risk import ProjectData
 from app.schemas.assessment import PersonnelAssessmentRequest, ProjectRiskAssessmentRequest
-from app.services.employee import employee_service
-from app.services.project_risk import project_risk_service
+from app.services.predict_strategies import PredictStrategyFactory
 from app.services.allocation_assessment import allocation_assessment_service
 from app.services.project_risk_assessment import project_risk_assessment_service
+from fastapi.concurrency import run_in_threadpool
+from app.services.tool_safety_guard import tool_safety_guard
 
-# Legacy wrappers
-def predict_employee_allocation_wrapper(**kwargs) -> dict:
-    """Wrapper function to instantiate AllocationRequest and call the ML service."""
+# Async wrappers using Strategy Factory to offload synchronous code to Starlette threadpool
+async def predict_employee_allocation_wrapper(**kwargs) -> dict:
+    """Wrapper function to instantiate AllocationRequest and call the ML service on threadpool."""
+    is_safe, safety_err = tool_safety_guard.validate_tool_call("predict_employee_allocation", kwargs)
+    if not is_safe:
+        return {"error": f"Lỗi an toàn: {safety_err}"}
     request_obj = AllocationRequest(**kwargs)
-    return employee_service.predict(request_obj)
+    strategy = PredictStrategyFactory.get_strategy("allocation")
+    return await strategy.predict(request_obj)
 
-def predict_project_risk_wrapper(**kwargs) -> dict:
-    """Wrapper function to instantiate ProjectData and call the ML service."""
+async def predict_project_risk_wrapper(**kwargs) -> dict:
+    """Wrapper function to instantiate ProjectData and call the ML service on threadpool."""
+    is_safe, safety_err = tool_safety_guard.validate_tool_call("predict_project_risk", kwargs)
+    if not is_safe:
+        return {"error": f"Lỗi an toàn: {safety_err}"}
     data_obj = ProjectData(**kwargs)
-    return project_risk_service.predict(data_obj)
+    strategy = PredictStrategyFactory.get_strategy("project_risk")
+    return await strategy.predict(data_obj)
 
-# New async wrappers for deterministic orchestrator execution (bypassing LLM explanations)
+# Async wrappers for deterministic orchestrator execution (bypassing LLM explanations)
 async def assess_employee_allocation_wrapper(**kwargs) -> dict:
-    """Wrapper function to call the allocation assessment service asynchronously, bypassing LLM explanation."""
+    """Wrapper function to call the allocation assessment service asynchronously on threadpool, bypassing LLM explanation."""
+    is_safe, safety_err = tool_safety_guard.validate_tool_call("assess_employee_allocation", kwargs)
+    if not is_safe:
+        return {"error": f"Lỗi an toàn: {safety_err}"}
     request_obj = PersonnelAssessmentRequest(**kwargs)
+    # assess performs async operations, but underlying ML predictions are offloaded
     res = await allocation_assessment_service.assess(request_obj, bypass_llm=True)
     return res.model_dump()
 
 async def assess_project_risk_wrapper(**kwargs) -> dict:
-    """Wrapper function to call the project risk assessment service asynchronously, bypassing LLM explanation."""
+    """Wrapper function to call the project risk assessment service asynchronously on threadpool, bypassing LLM explanation."""
+    is_safe, safety_err = tool_safety_guard.validate_tool_call("assess_project_risk", kwargs)
+    if not is_safe:
+        return {"error": f"Lỗi an toàn: {safety_err}"}
     request_obj = ProjectRiskAssessmentRequest(**kwargs)
     res = await project_risk_assessment_service.assess(request_obj, bypass_llm=True)
     return res.model_dump()
 
-# Create StructuredTools
+# Create StructuredTools using the asynchronous wrappers
 predict_employee_allocation_tool = StructuredTool.from_function(
-    func=predict_employee_allocation_wrapper,
+    coroutine=predict_employee_allocation_wrapper,
     name="predict_employee_allocation",
     description=(
         "Sử dụng công cụ này để dự báo sự phù hợp và khả năng thành công của một nhân viên "
@@ -44,7 +60,7 @@ predict_employee_allocation_tool = StructuredTool.from_function(
 )
 
 predict_project_risk_tool = StructuredTool.from_function(
-    func=predict_project_risk_wrapper,
+    coroutine=predict_project_risk_wrapper,
     name="predict_project_risk",
     description=(
         "Sử dụng công cụ này để dự báo mức độ rủi ro của dự án (Thấp/Trung bình hoặc Cao/Nghiêm trọng) "

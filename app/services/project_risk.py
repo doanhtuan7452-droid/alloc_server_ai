@@ -29,7 +29,35 @@ class ProjectRiskService:
 
     def prepare_features(self, data: ProjectData) -> pd.DataFrame:
         """Convert input data into a DataFrame and filter feature columns."""
-        input_dict = data.model_dump() if hasattr(data, "model_dump") else data.dict()
+        if isinstance(data, dict):
+            methodology = str(data.get("methodology", "agile")).lower()
+            p_days = data.get("Project_Duration_Days")
+            exp_budget = data.get("Expected_Budget")
+            t_size = data.get("Team_Size")
+            avg_skill = data.get("Avg_Team_Skill_Level")
+            comp_score = data.get("Complexity_Score")
+            b_util = data.get("Budget_Utilization")
+        else:
+            methodology = data.methodology.lower()
+            p_days = data.Project_Duration_Days
+            exp_budget = data.Expected_Budget
+            t_size = data.Team_Size
+            avg_skill = data.Avg_Team_Skill_Level
+            comp_score = data.Complexity_Score
+            b_util = data.Budget_Utilization
+
+        input_dict = {
+            "Project_Duration_Days": p_days,
+            "Expected_Budget": exp_budget,
+            "Team_Size": t_size,
+            "Avg_Team_Skill_Level": avg_skill,
+            "Complexity_Score": comp_score,
+            "Budget_Utilization": b_util,
+            "Methodology_Used_Hybrid": 1 if methodology == "hybrid" else 0,
+            "Methodology_Used_Kanban": 1 if methodology == "kanban" else 0,
+            "Methodology_Used_Scrum": 1 if methodology == "scrum" else 0,
+            "Methodology_Used_Waterfall": 1 if methodology == "waterfall" else 0
+        }
         input_df = pd.DataFrame([input_dict])
         
         # Normalize Budget_Utilization if sent as percentage (e.g. > 2.0)

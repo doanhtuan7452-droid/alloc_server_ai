@@ -17,8 +17,13 @@ PROJECT_RISK_MODEL_DIR = settings.PROJECT_RISK_MODEL_DIR
 PROJECT_RISK_MODEL_PATH = settings.PROJECT_RISK_MODEL_PATH
 PROJECT_RISK_SCALER_PATH = settings.PROJECT_RISK_SCALER_PATH
 
+FIT_REGRESSOR_MODEL_DIR = settings.FIT_REGRESSOR_MODEL_DIR
+FIT_REGRESSOR_MODEL_PATH = settings.FIT_REGRESSOR_MODEL_PATH
+FIT_REGRESSOR_SCALER_PATH = settings.FIT_REGRESSOR_SCALER_PATH
+
 ALLOCATION_FEATURE_COLUMNS = settings.ALLOCATION_FEATURE_COLUMNS
 PROJECT_RISK_FEATURE_COLUMNS = settings.PROJECT_RISK_FEATURE_COLUMNS
+FIT_REGRESSOR_FEATURE_COLUMNS = settings.FIT_REGRESSOR_FEATURE_COLUMNS
 
 # 2. Utility Function Re-exports
 def model_to_dict(data: BaseModel) -> dict:
@@ -41,6 +46,7 @@ from app.schemas.project_risk import ProjectData
 # 4. Import Services (so we can pre-populate them on import-time loading)
 from app.services.employee import employee_service
 from app.services.project_risk import project_risk_service
+from app.services.fit_regressor import fit_regressor_service
 
 # 5. Load model binaries immediately at module import time to maintain import-time properties
 import joblib
@@ -72,6 +78,18 @@ except Exception as exc:
     project_risk_model = None
     project_risk_scaler = None
 
+try:
+    fit_regressor_model = joblib.load(FIT_REGRESSOR_MODEL_PATH)
+    fit_regressor_scaler = joblib.load(FIT_REGRESSOR_SCALER_PATH)
+    
+    # Pre-populate service to prevent duplicate loading on lifespan startup
+    fit_regressor_service.model = fit_regressor_model
+    fit_regressor_service.scaler = fit_regressor_scaler
+except Exception as exc:
+    print(f"[!] Could not load fit regressor models at module import: {exc}")
+    fit_regressor_model = None
+    fit_regressor_scaler = None
+
 # 6. Re-export Assertions
 def ensure_employee_models_loaded() -> None:
     if (
@@ -91,6 +109,13 @@ def ensure_project_risk_models_loaded() -> None:
             detail="Project risk model is not loaded.",
         )
 
+def ensure_fit_regressor_models_loaded() -> None:
+    if fit_regressor_service.model is None or fit_regressor_service.scaler is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Fit regressor model is not loaded.",
+        )
+
 # 7. Import real app instance and expose it
 from app.main import app
 
@@ -98,3 +123,4 @@ from app.main import app
 from app.api.endpoints.allocation import suggest_allocation
 from app.api.endpoints.project_risk import predict_project_risk
 from app.api.endpoints.assessment import assess_personnel_allocation, assess_project_risk
+from app.api.endpoints.fit_regressor import predict_fit_percentage

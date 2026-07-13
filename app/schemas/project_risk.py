@@ -1,3 +1,4 @@
+from typing import Literal
 from pydantic import BaseModel
 
 class ProjectData(BaseModel):
@@ -7,7 +8,5 @@ class ProjectData(BaseModel):
     Avg_Team_Skill_Level: float
     Complexity_Score: float
     Budget_Utilization: float
-    Methodology_Used_Kanban: int
-    Methodology_Used_Scrum: int
-    Methodology_Used_Waterfall: int
-    Methodology_Used_Hybrid: int
+    methodology: Literal["Agile", "Waterfall", "Scrum", "Kanban", "Hybrid"]
+
