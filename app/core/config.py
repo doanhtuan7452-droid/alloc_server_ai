@@ -178,6 +178,50 @@ class Settings:
         ).split(",") if h.strip()
     ]
 
+    def __init__(self):
+        # Tự động chuẩn hóa MongoDB URL khi khởi tạo cấu hình
+        self.MONGODB_URL = self._escape_mongodb_url(self.MONGODB_URL)
+
+    @staticmethod
+    def _escape_mongodb_url(url: str) -> str:
+        import urllib.parse
+        if not (url.startswith("mongodb://") or url.startswith("mongodb+srv://")):
+            return url
+        
+        prefix = "mongodb+srv://" if url.startswith("mongodb+srv://") else "mongodb://"
+        rest = url[len(prefix):]
+        
+        # Tách phần options (sau dấu '?') khỏi phần còn lại của URI
+        if '?' in rest:
+            main_part, options = rest.split('?', 1)
+            options_str = '?' + options
+        else:
+            main_part = rest
+            options_str = ''
+            
+        # Tìm dấu ngăn cách credentials (dấu '@' cuối cùng trong main_part)
+        if '@' not in main_part:
+            return url
+            
+        creds, host_and_path = main_part.rsplit('@', 1)
+        
+        if ':' in creds:
+            username, password = creds.split(':', 1)
+        else:
+            username = creds
+            password = ""
+            
+        # Giải mã trước để tránh double-encoding, sau đó mã hóa chuẩn RFC 3986
+        escaped_username = urllib.parse.quote_plus(urllib.parse.unquote(username))
+        escaped_password = urllib.parse.quote_plus(urllib.parse.unquote(password))
+        
+        if escaped_password:
+            escaped_creds = f"{escaped_username}:{escaped_password}"
+        else:
+            escaped_creds = escaped_username
+            
+        return f"{prefix}{escaped_creds}@{host_and_path}{options_str}"
+
 
 settings = Settings()
 

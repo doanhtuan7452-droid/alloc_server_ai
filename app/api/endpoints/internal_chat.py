@@ -96,7 +96,7 @@ async def list_conversation_messages(
     user_id: str = Query(..., description="ID người dùng sở hữu để kiểm định IDOR"),
     limit: int = Query(default=50, ge=1, le=100, description="Số lượng tin nhắn tối đa trả về"),
     skip: int = Query(default=0, ge=0, le=1000, description="Số lượng tin nhắn bỏ qua"),
-    order: str = Query(default="asc", regex="^(asc|desc)$", description="Thứ tự sắp xếp tin nhắn (asc hoặc desc)")
+    order: str = Query(default="asc", pattern="^(asc|desc)$", description="Thứ tự sắp xếp tin nhắn (asc hoặc desc)")
 ):
     db = request.app.state.db
     if db is None:

@@ -9,8 +9,8 @@ from app.core.config import settings
 
 logger = logging.getLogger("app.core.security")
 
-# Alphanumeric and hyphens (suitable for UUIDs, MD5s, hex IDs)
-ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-]+$")
+# Alphanumeric, hyphens, and underscores (suitable for UUIDs, MD5s, hex IDs, and snake_case IDs)
+ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-_]+$")
 
 # Safe characters for HTTP header values (no newlines, control characters, or Mongo operators)
 HEADER_VALUE_PATTERN = re.compile(r"^[a-zA-Z0-9 \t\-\.\:\/\=\_\,\;\+\@\*\?\!\%\(\)]+$")
