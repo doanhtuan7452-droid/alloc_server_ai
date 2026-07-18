@@ -69,8 +69,8 @@ def validate_dynamic_tools_metadata(meta: Optional[Dict[str, Any]]) -> Optional[
                 # System IDs / signatures should be alphanumeric + hyphens
                 str_val = str(value).strip()
                 if not ID_PATTERN.match(str_val) and len(str_val) > 0:
-                    # Signatures can be slightly longer and contain dots/equals/underscores
-                    if not re.match(r"^[a-zA-Z0-9\-\.\_\=\/]+$", str_val):
+                    # Signatures can be slightly longer and contain dots/equals/underscores/plus
+                    if not re.match(r"^[a-zA-Z0-9\-\.\_\=\/\+]+$", str_val):
                         logger.warning(f"[Security Guard] Phát hiện giá trị bối cảnh không an toàn cho {key}: {str_val}")
                         raise HTTPException(
                             status_code=status.HTTP_400_BAD_REQUEST,
