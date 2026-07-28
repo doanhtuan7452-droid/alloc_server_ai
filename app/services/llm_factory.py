@@ -25,8 +25,15 @@ class LLMFactory:
     def get_llm(cls, provider: str = None, model: str = None, temperature: float = None, **kwargs) -> BaseChatModel:
         prov = (provider or settings.LLM_PROVIDER).lower()
         
-        # If provider matches system default, use system model. Otherwise, fall back to provider default.
-        if provider is None or prov == settings.LLM_PROVIDER.lower():
+        # Fallback to gemini if requested openai but api key is missing
+        is_fallback = False
+        if prov == "openai" and not settings.OPENAI_API_KEY:
+            prov = "gemini"
+            model = "gemini-2.0-flash"
+            is_fallback = True
+            
+        # If provider matches system default or fell back, use system model. Otherwise, fall back to provider default.
+        if is_fallback or provider is None or prov == settings.LLM_PROVIDER.lower():
             model_name = model or settings.LLM_MODEL
         else:
             model_name = model or cls._default_models.get(prov, "gpt-4o-mini")

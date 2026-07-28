@@ -30,7 +30,22 @@ class ProjectRiskService:
     def prepare_features(self, data: ProjectData) -> pd.DataFrame:
         """Convert input data into a DataFrame and filter feature columns."""
         if isinstance(data, dict):
-            methodology = str(data.get("methodology", "agile")).lower()
+            methodology = data.get("methodology")
+            if not methodology:
+                # Infer from binary fields
+                if data.get("Methodology_Used_Hybrid") == 1:
+                    methodology = "hybrid"
+                elif data.get("Methodology_Used_Kanban") == 1:
+                    methodology = "kanban"
+                elif data.get("Methodology_Used_Scrum") == 1:
+                    methodology = "scrum"
+                elif data.get("Methodology_Used_Waterfall") == 1:
+                    methodology = "waterfall"
+                else:
+                    methodology = "agile"
+            else:
+                methodology = str(methodology).lower()
+                
             p_days = data.get("Project_Duration_Days")
             exp_budget = data.get("Expected_Budget")
             t_size = data.get("Team_Size")
@@ -38,7 +53,20 @@ class ProjectRiskService:
             comp_score = data.get("Complexity_Score")
             b_util = data.get("Budget_Utilization")
         else:
-            methodology = data.methodology.lower()
+            methodology = data.methodology.lower() if data.methodology else None
+            if not methodology:
+                # Infer from binary fields
+                if data.Methodology_Used_Hybrid == 1:
+                    methodology = "hybrid"
+                elif data.Methodology_Used_Kanban == 1:
+                    methodology = "kanban"
+                elif data.Methodology_Used_Scrum == 1:
+                    methodology = "scrum"
+                elif data.Methodology_Used_Waterfall == 1:
+                    methodology = "waterfall"
+                else:
+                    methodology = "agile"
+                    
             p_days = data.Project_Duration_Days
             exp_budget = data.Expected_Budget
             t_size = data.Team_Size
