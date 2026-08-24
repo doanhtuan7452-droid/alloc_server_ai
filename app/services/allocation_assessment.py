@@ -1,4 +1,4 @@
-from typing import Union, List
+from typing import Union, List, Any
 from fastapi import HTTPException
 from langchain_core.messages import SystemMessage, HumanMessage
 from app.schemas.assessment import (
@@ -15,6 +15,7 @@ from app.services.employee import employee_service
 from app.services.fit_regressor import fit_regressor_service
 from app.services.llm_factory import LLMFactory
 from app.services.memory_service import count_tokens
+from app.services.skill_filter_service import skill_filter_service, CandidateSkillFilterResult
 from app.core.config import settings
 import asyncio
 
@@ -22,7 +23,8 @@ class AllocationAssessmentService:
     async def assess(
         self,
         request: Union[PersonnelAssessmentRequest, BulkAssessmentRequest],
-        bypass_llm: bool = False
+        bypass_llm: bool = False,
+        db: Any = None
     ) -> Union[AllocationAssessmentResponse, BulkAllocationAssessmentResponse]:
         # 1. Ensure the ML recommendation model and Fit Regressor model are loaded
         employee_service.ensure_loaded()
@@ -32,6 +34,7 @@ class AllocationAssessmentService:
         is_bulk = request.request_type == "bulk"
 
         # 3. Prepare task-level fields
+        task_name = getattr(request, "task_name", None)
         task_complexity = request.task_complexity
         deadline_days = request.deadline_days
         required_skill_level = request.required_skill_level
@@ -39,7 +42,7 @@ class AllocationAssessmentService:
         task_priority = request.task_priority
         team_size = request.team_size
 
-        # 4. Prepare candidates list and their mapped AllocationRequests
+        # 4. Prepare candidates list
         if is_bulk:
             candidates = request.employees
         else:
@@ -57,15 +60,31 @@ class AllocationAssessmentService:
                     problem_solving_score=request.problem_solving_score,
                     attendance_rate=request.attendance_rate,
                     performance_rating=request.performance_rating,
-                    conflict_rate=request.conflict_rate
+                    conflict_rate=request.conflict_rate,
+                    skills=getattr(request, "skills", []) or []
                 )
             ]
 
-        # Map each candidate to AllocationRequest for vectorized batch inference
+        # 5. NLP / Embedding Skill Filtering: Lọc kỹ năng & tính EffectiveTechScore
+        skill_filter_results = await skill_filter_service.filter_bulk_candidate_skills(
+            task_name=task_name,
+            candidates=candidates,
+            provider=request.provider or settings.LLM_PROVIDER,
+            model=request.model,
+            db=db
+        )
+
+        # Map each candidate to AllocationRequest with effective technical skill score
         allocation_requests = []
         adapter_results = []
-        for candidate in candidates:
-            adapter_res = candidate.to_allocation_request(
+        for candidate, filter_res in zip(candidates, skill_filter_results):
+            # Tạo bản sao candidate đã được hiệu chỉnh điểm kỹ năng thực tế
+            adjusted_candidate = candidate.model_copy(update={
+                "technical_skill_score": filter_res.effective_tech_score,
+                "skill_level": filter_res.derived_skill_level
+            })
+
+            adapter_res = adjusted_candidate.to_allocation_request(
                 task_complexity=task_complexity,
                 deadline_days=deadline_days,
                 required_skill_level=required_skill_level,
@@ -76,20 +95,21 @@ class AllocationAssessmentService:
             allocation_requests.append(adapter_res.allocation_request)
             adapter_results.append(adapter_res)
 
-        # 5. Run ML predictions vectorized in a single batch
+        # 6. Run ML predictions vectorized in a single batch
         ml_results = employee_service.predict_batch_with_probabilities(allocation_requests)
 
-        # 5b. Run Fit Regressor model predictions vectorized in a single batch via Worker Thread Pool
+        # 6b. Run Fit Regressor model predictions vectorized in a single batch via Worker Thread Pool
         fit_percentages = await run_in_threadpool(
             fit_regressor_service.predict_batch,
             allocation_requests
         )
 
-        # 6. Setup LLM concurrency semaphore (max 5 concurrent calls)
+        # 7. Setup LLM concurrency semaphore (max 5 concurrent calls)
         semaphore = asyncio.Semaphore(5)
 
         async def _assess_single_candidate_with_llm(
             candidate: EmployeeAssessmentInput,
+            filter_res: CandidateSkillFilterResult,
             adapter_res,
             ml_res: dict,
             fit_percentage: float
@@ -101,7 +121,7 @@ class AllocationAssessmentService:
 
                 # Resolve the actual values used during ML model preprocessing
                 skill_map = {"low": 0, "medium": 1, "high": 2, "expert": 3}
-                skill_level_str = candidate.skill_level.lower().strip()
+                skill_level_str = filter_res.derived_skill_level.lower().strip()
                 req_skill_level_str = (required_skill_level or "medium").lower().strip()
                 
                 skill_val = skill_map.get(skill_level_str, 1)
@@ -118,8 +138,11 @@ class AllocationAssessmentService:
                 # Enriched Success Factors classification
                 if candidate.communication_score >= 85:
                     success_factors.append("Kỹ năng giao tiếp xuất sắc (score >= 85)")
-                if candidate.technical_skill_score >= 85:
-                    success_factors.append("Kỹ năng chuyên môn xuất sắc (score >= 85)")
+                if filter_res.effective_tech_score >= 80:
+                    success_factors.append("Kỹ năng chuyên môn thực tế xuất sắc (score >= 80)")
+                if filter_res.matched_skills and filter_res.semantic_skill_score >= 60:
+                    matched_names = ", ".join(s.skill_name for s in filter_res.matched_skills)
+                    success_factors.append(f"Kỹ năng khớp tốt với yêu cầu Task ({matched_names})")
                 if candidate.experience_years >= 5:
                     success_factors.append("Kinh nghiệm phong phú (>= 5 năm)")
                 if skill_gap >= 1:
@@ -134,8 +157,13 @@ class AllocationAssessmentService:
                     potential_challenges.append("Thời gian hoàn thành quá ngắn (<= 7 ngày)")
                 if task_complexity in ("high", "critical"):
                     potential_challenges.append("Độ phức tạp công việc cao (high/critical)")
-                if candidate.technical_skill_score < 60:
-                    potential_challenges.append("Kỹ năng chuyên môn yếu (< 60)")
+                if filter_res.effective_tech_score < 60:
+                    potential_challenges.append("Kỹ năng chuyên môn thực tế chưa đạt mức kỳ vọng (< 60)")
+                if not filter_res.matched_skills and task_name:
+                    potential_challenges.append("Không có kỹ năng chuyên môn phù hợp với yêu cầu của Task")
+                elif filter_res.is_marginal_match:
+                    marginal_names = ", ".join(s.skill_name for s in filter_res.matched_skills)
+                    potential_challenges.append(f"Kỹ năng chỉ liên quan gián tiếp đến Task ({marginal_names})")
                 if candidate.communication_score < 60:
                     potential_challenges.append("Kỹ năng giao tiếp yếu (< 60)")
                 if skill_gap < 0:
@@ -162,6 +190,15 @@ class AllocationAssessmentService:
                     business_status_code = "APPROVED"
                     business_status_text = "CHẤP THUẬN"
 
+                # Chuẩn bị thông tin kỹ năng đã lọc cho Prompt
+                if filter_res.matched_skills:
+                    matched_str = ", ".join(f"{s.skill_name} (Level {s.level})" for s in filter_res.matched_skills)
+                    skill_matching_info = f"- Kỹ năng chuyên môn khớp với Task: {matched_str} (Điểm tương quan ngữ nghĩa: {filter_res.semantic_skill_score}/100)"
+                    if filter_res.is_marginal_match:
+                        skill_matching_info += " [Lưu ý: Kỹ năng chỉ có mức độ liên quan gián tiếp]"
+                else:
+                    skill_matching_info = "- Kỹ năng chuyên môn khớp với Task: Không có kỹ năng nào phù hợp (Điểm tương quan ngữ nghĩa: 0/100)"
+
                 # LLM Explanation (or bypass)
                 token_usage = TokenUsage()
                 if bypass_llm:
@@ -183,7 +220,7 @@ class AllocationAssessmentService:
                                 "1. KHÔNG được thay đổi kết luận của mô hình ML và các luật nghiệp vụ. Kết luận đó là chân lý nền tảng (ground truth).\n"
                                 "2. KHÔNG được thêm bớt các sự thật bên ngoài không có trong dữ liệu đầu vào hoặc kết quả phân tích.\n"
                                 "3. KHÔNG được tự ý đưa ra phán quyết khác với kết quả đã cho.\n"
-                                "4. Chỉ giải thích lý do tại sao kết quả đó xảy ra dựa trên dữ liệu đầu vào và các yếu tố thành công/thách thức được cung cấp.\n"
+                                "4. Chỉ giải thích lý do tại sao kết quả đó xảy ra dựa trên dữ liệu đầu vào, các kỹ năng khớp và các yếu tố thành công/thách thức được cung cấp.\n"
                                 "5. Luôn tuân thủ định dạng phản hồi được yêu cầu.\n\n"
                                 "Ví dụ định dạng khi rủi ro cao (WARNING):\n"
                                 "\"Xin lỗi, nhân viên này có rủi ro cao (X% failed). Mặc dù có [yếu tố thành công 1], nhưng [thách thức 1] kết hợp với [thách thức 2] sẽ khó khăn. Tôi đề xuất: (1) [đề xuất 1] (2) [đề xuất 2] hoặc (3) [đề xuất 3]\"\n\n"
@@ -193,11 +230,14 @@ class AllocationAssessmentService:
                                 "\"Chúc mừng, nhân viên này được đánh giá an toàn (X% success). Với [yếu tố thành công 1], việc hoàn thành công việc là hoàn toàn khả thi. Tôi đề xuất: (1) [đề xuất 1] (2) [đề xuất 2].\""
                             )
 
+                            task_info_str = f"Tên công việc (Task): {task_name}\n" if task_name else ""
                             user_prompt = (
-                                f"Thông tin nhân viên:\n"
+                                f"Thông tin nhiệm vụ & Nhân viên:\n"
+                                f"{task_info_str}"
                                 f"- Số năm kinh nghiệm: {candidate.experience_years} năm\n"
-                                f"- Điểm kỹ năng chuyên môn: {candidate.technical_skill_score}/100\n"
+                                f"- Điểm kỹ năng chuyên môn thực tế (đã hiệu chỉnh theo task): {filter_res.effective_tech_score}/100 (Điểm HR gốc: {candidate.technical_skill_score}/100)\n"
                                 f"- Điểm kỹ năng giao tiếp: {candidate.communication_score}/100\n"
+                                f"{skill_matching_info}\n"
                                 f"- Độ phức tạp công việc: {task_complexity}\n"
                                 f"- Hạn chót: {deadline_days} ngày\n\n"
                                 f"Phân tích ML & Nghiệp vụ:\n"
@@ -283,6 +323,9 @@ class AllocationAssessmentService:
                     assumptions=adapter_res.assumptions,
                     missing_fields=adapter_res.missing_fields,
                     confidence_penalty=adapter_res.confidence_penalty,
+                    matched_skills=filter_res.matched_skills,
+                    semantic_skill_score=filter_res.semantic_skill_score,
+                    is_marginal_match=filter_res.is_marginal_match,
                     usage=token_usage
                 )
             except Exception as candidate_err:
@@ -304,13 +347,18 @@ class AllocationAssessmentService:
                     assumptions=adapter_res.assumptions if 'adapter_res' in locals() else {},
                     missing_fields=adapter_res.missing_fields if 'adapter_res' in locals() else [],
                     confidence_penalty=adapter_res.confidence_penalty if 'adapter_res' in locals() else 0.0,
+                    matched_skills=filter_res.matched_skills if 'filter_res' in locals() else [],
+                    semantic_skill_score=filter_res.semantic_skill_score if 'filter_res' in locals() else 0.0,
+                    is_marginal_match=filter_res.is_marginal_match if 'filter_res' in locals() else False,
                     usage=TokenUsage()
                 )
 
-        # 7. Collect results asynchronously using gather
+        # 8. Collect results asynchronously using gather
         tasks = [
-            _assess_single_candidate_with_llm(candidate, adapter_res, ml_res, fit_pct)
-            for candidate, adapter_res, ml_res, fit_pct in zip(candidates, adapter_results, ml_results, fit_percentages)
+            _assess_single_candidate_with_llm(candidate, filter_res, adapter_res, ml_res, fit_pct)
+            for candidate, filter_res, adapter_res, ml_res, fit_pct in zip(
+                candidates, skill_filter_results, adapter_results, ml_results, fit_percentages
+            )
         ]
 
         # Use return_exceptions=True to keep other tasks running even if one raises a raw exception
@@ -339,13 +387,16 @@ class AllocationAssessmentService:
                         assumptions={},
                         missing_fields=[],
                         confidence_penalty=0.0,
+                        matched_skills=[],
+                        semantic_skill_score=0.0,
+                        is_marginal_match=False,
                         usage=TokenUsage()
                     )
                 )
             else:
                 resolved_results.append(res)
 
-        # 8. Return response based on request mode
+        # 9. Return response based on request mode
         if is_bulk:
             total_prompt = sum(r.usage.prompt_tokens for r in resolved_results)
             total_completion = sum(r.usage.completion_tokens for r in resolved_results)
@@ -373,7 +424,11 @@ class AllocationAssessmentService:
                 missing_fields=single_res.missing_fields,
                 confidence_penalty=single_res.confidence_penalty,
                 fit_percentage=single_res.fit_percentage,
+                matched_skills=single_res.matched_skills,
+                semantic_skill_score=single_res.semantic_skill_score,
+                is_marginal_match=single_res.is_marginal_match,
                 usage=single_res.usage
             )
 
 allocation_assessment_service = AllocationAssessmentService()
+

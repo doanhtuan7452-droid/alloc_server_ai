@@ -4,6 +4,10 @@ from app.schemas.allocation import AllocationRequest
 from app.schemas.project_risk import ProjectData
 from app.schemas.mongo_chat import TokenUsage
 
+class SkillItemDto(BaseModel):
+    skill_name: str = Field(..., description="Tên kỹ năng")
+    level: int = Field(default=3, ge=1, le=5, description="Trình độ kỹ năng (1-5)")
+
 class AdapterResult(BaseModel):
     allocation_request: AllocationRequest
     assumptions: Dict[str, Union[float, str, int]]
@@ -12,6 +16,7 @@ class AdapterResult(BaseModel):
 
 class PersonnelAssessmentRequest(BaseModel):
     request_type: Literal["single"] = "single"
+    task_name: Optional[str] = Field(None, description="Tên nhiệm vụ/công việc cần đánh giá")
     experience_years: float = Field(ge=0)
     skill_level: Literal["low", "medium", "high", "expert"]
     technical_skill_score: float = Field(ge=0.0, le=100.0)
@@ -30,6 +35,7 @@ class PersonnelAssessmentRequest(BaseModel):
     attendance_rate: Optional[float] = Field(None, ge=0.0, le=100.0)
     performance_rating: Optional[str] = None
     conflict_rate: Optional[float] = Field(None, ge=0.0, le=100.0)
+    skills: List[SkillItemDto] = Field(default_factory=list, description="Danh sách kỹ năng của ứng viên")
 
     # Optional LLM settings
     provider: Optional[str] = None
@@ -105,6 +111,7 @@ class EmployeeAssessmentInput(BaseModel):
     attendance_rate: Optional[float] = Field(None, ge=0.0, le=100.0)
     performance_rating: Optional[str] = None
     conflict_rate: Optional[float] = Field(None, ge=0.0, le=100.0)
+    skills: List[SkillItemDto] = Field(default_factory=list, description="Danh sách kỹ năng của ứng viên")
 
     def to_allocation_request(
         self,
@@ -187,6 +194,7 @@ class EmployeeAssessmentInput(BaseModel):
 
 class BulkAssessmentRequest(BaseModel):
     request_type: Literal["bulk"] = "bulk"
+    task_name: Optional[str] = Field(None, description="Tên nhiệm vụ/công việc cần đánh giá")
     task_complexity: Literal["low", "medium", "high", "critical"]
     deadline_days: int = Field(gt=0)
     required_skill_level: Optional[str] = None
@@ -221,6 +229,9 @@ class AllocationAssessmentResponse(BaseModel):
     missing_fields: List[str]
     confidence_penalty: float
     fit_percentage: float
+    matched_skills: List[SkillItemDto] = Field(default_factory=list, description="Danh sách kỹ năng thực sự phù hợp với task")
+    semantic_skill_score: float = Field(default=0.0, ge=0.0, le=100.0, description="Điểm kỹ năng ngữ nghĩa tương ứng với task [0, 100]")
+    is_marginal_match: bool = Field(default=False, description="Cờ cảnh báo kỹ năng chỉ đạt mức tương quan gián tiếp [0.30, 0.40)")
     usage: TokenUsage = Field(default_factory=TokenUsage, description="Báo cáo số token tiêu thụ")
 
 class EmployeeAllocationAssessmentResult(BaseModel):
@@ -240,6 +251,9 @@ class EmployeeAllocationAssessmentResult(BaseModel):
     assumptions: Dict[str, Union[float, str, int]]
     missing_fields: List[str]
     confidence_penalty: float
+    matched_skills: List[SkillItemDto] = Field(default_factory=list, description="Danh sách kỹ năng thực sự phù hợp với task")
+    semantic_skill_score: float = Field(default=0.0, ge=0.0, le=100.0, description="Điểm kỹ năng ngữ nghĩa tương ứng với task [0, 100]")
+    is_marginal_match: bool = Field(default=False, description="Cờ cảnh báo kỹ năng chỉ đạt mức tương quan gián tiếp [0.30, 0.40)")
     usage: TokenUsage = Field(default_factory=TokenUsage, description="Báo cáo số token tiêu thụ cho ứng viên này")
 
 class BulkAllocationAssessmentResponse(BaseModel):
@@ -258,3 +272,4 @@ class ProjectRiskAssessmentResponse(BaseModel):
     llm_insight: str
     explanation_source: str
     usage: TokenUsage = Field(default_factory=TokenUsage, description="Báo cáo số token tiêu thụ")
+

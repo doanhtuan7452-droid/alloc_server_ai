@@ -26,7 +26,8 @@ async def assess_personnel_allocation(
     payload: Union[PersonnelAssessmentRequest, BulkAssessmentRequest] = Body(...)
 ):
     try:
-        return await allocation_assessment_service.assess(payload)
+        db = getattr(request.app.state, "db", None) if hasattr(request, "app") and hasattr(request.app, "state") else None
+        return await allocation_assessment_service.assess(payload, db=db)
     except HTTPException as http_exc:
         raise http_exc
     except Exception as exc:
